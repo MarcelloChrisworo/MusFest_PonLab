@@ -47,6 +47,10 @@ Invoke-RestMethod -Method Post `
 
 Payment is simulated; this project does not connect to GoPay or another payment gateway.
 
+## Email notifications
+
+To enable email notifications, set `EMAIL_WEBHOOK_URL` to the deployed Apps Script Web app URL and `EMAIL_WEBHOOK_SECRET` to the same value as the Apps Script `WEBHOOK_SECRET` Script Property in the root `.env` file. The API sends a pending notification after saving an order and a paid notification after simulated payment and ticket creation. The payment remains simulated; Apps Script only sends email.
+
 ## Run automated tests
 
 The tests use a separate PostgreSQL database named `musfest_test`; they should not use the demo database.
@@ -67,7 +71,7 @@ npm ci
 npm test -- --runInBand
 ```
 
-The tests cover database connectivity, pending orders, simulated payment and ticket creation, insufficient quota, and expired orders.
+The tests cover database connectivity, pending orders, simulated payment and ticket creation, insufficient quota, expired orders, and 200 simultaneous one-ticket orders. The concurrency test uses 200 different buyers and checks that a quota of 100 produces exactly 100 paid tickets and 100 rejected orders.
 
 ## CI/CD
 

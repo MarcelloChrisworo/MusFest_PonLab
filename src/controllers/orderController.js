@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const sendEmailNotification = require('../services/emailWebhook');
 const { randomUUID } = require('crypto');
 
 function httpError(status, message) {
@@ -108,8 +109,20 @@ exports.createOrder = async (req, res) => {
             [req.user.id, ticketTypeId, quantity]
         );
 
+        const buyerResult = await client.query(
+            'SELECT email FROM users WHERE id = $1',
+            [req.user.id]
+        );
         await client.query('COMMIT');
         transactionStarted = false;
+
+        await sendEmailNotification({
+            orderId: orderResult.rows[0].id,
+            email: buyerResult.rows[0].email,
+            status: 'pending',
+            quantity: orderResult.rows[0].quantity,
+            expiresAt: orderResult.rows[0].expires_at
+        });
 
         return res.status(201).json({
             order: {
@@ -145,9 +158,10 @@ exports.simulatePayment = async (req, res) => {
         transactionStarted = true;
 
         const lookup = await client.query(
-            `SELECT tt.event_id
+            `SELECT tt.event_id, u.email
              FROM orders o
              JOIN ticket_types tt ON tt.id = o.ticket_type_id
+             JOIN users u ON u.id = o.buyer_id
              WHERE o.id = $1 AND o.buyer_id = $2`,
             [req.params.id, req.user.id]
         );
@@ -220,6 +234,14 @@ exports.simulatePayment = async (req, res) => {
 
         await client.query('COMMIT');
         transactionStarted = false;
+
+        await sendEmailNotification({
+            orderId: order.id,
+            email: lookup.rows[0].email,
+            status: 'paid',
+            quantity: order.quantity,
+            ticketCodes: tickets.map((ticket) => ticket.code)
+        });
 
         return res.json({
             order: { id: order.id, status: 'paid' },
