@@ -20,3 +20,10 @@ exports.requireOrganizer = (req, res, next) => {
     }
     next();
 };
+exports.requireBuyer = (req, res, next) => {
+    if (req.user.role !== 'buyer') {
+        return res.status(403).json({ error: 'Buyer account required' });
+    }
+
+    next();
+};

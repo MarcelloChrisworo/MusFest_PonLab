@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const authRoutes = require('./routes/authRoutes');
 const eventRoutes = require('./routes/eventRoutes');
+const orderRoutes = require('./routes/orderRoutes');
 
 const app = express();
 
@@ -12,6 +13,7 @@ app.use(express.json());
 app.use(cors());
 app.use('/auth', authRoutes);
 app.use('/events', eventRoutes);
+app.use('/orders', orderRoutes);
 
 // View engine
 app.set('view engine', 'ejs');
