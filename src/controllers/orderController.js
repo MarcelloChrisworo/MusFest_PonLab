@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { randomUUID } = require('crypto');
 
 function httpError(status, message) {
     const error = new Error(message);
@@ -128,6 +129,113 @@ exports.createOrder = async (req, res) => {
 
         console.error('Could not create order:', error.message);
         return res.status(500).json({ error: 'Could not create order' });
+    } finally {
+        if (client) {
+            client.release();
+        }
+    }
+};
+exports.simulatePayment = async (req, res) => {
+    let client;
+    let transactionStarted = false;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+        transactionStarted = true;
+
+        const lookup = await client.query(
+            `SELECT tt.event_id
+             FROM orders o
+             JOIN ticket_types tt ON tt.id = o.ticket_type_id
+             WHERE o.id = $1 AND o.buyer_id = $2`,
+            [req.params.id, req.user.id]
+        );
+
+        if (lookup.rowCount === 0) {
+            throw httpError(404, 'Order not found');
+        }
+
+        await client.query(
+            'SELECT id FROM events WHERE id = $1 FOR UPDATE',
+            [lookup.rows[0].event_id]
+        );
+
+        const result = await client.query(
+            `SELECT id, quantity, status, (expires_at > NOW()) AS is_unexpired
+             FROM orders
+             WHERE id = $1 AND buyer_id = $2
+             FOR UPDATE`,
+            [req.params.id, req.user.id]
+        );
+
+        const order = result.rows[0];
+
+        if (order.status === 'paid') {
+            const existingTickets = await client.query(
+                'SELECT id, code, created_at FROM tickets WHERE order_id = $1 ORDER BY created_at',
+                [order.id]
+            );
+
+            await client.query('COMMIT');
+            transactionStarted = false;
+
+            return res.json({
+                order: { id: order.id, status: 'paid' },
+                tickets: existingTickets.rows,
+                alreadyPaid: true
+            });
+        }
+
+        if (order.status !== 'pending') {
+            throw httpError(409, `This order is ${order.status}`);
+        }
+
+        if (!order.is_unexpired) {
+            await client.query(
+                "UPDATE orders SET status = 'expired' WHERE id = $1",
+                [order.id]
+            );
+            await client.query('COMMIT');
+            transactionStarted = false;
+            return res.status(409).json({ error: 'This order has expired' });
+        }
+
+        await client.query(
+            "UPDATE orders SET status = 'paid' WHERE id = $1",
+            [order.id]
+        );
+
+        const tickets = [];
+        for (let i = 0; i < order.quantity; i += 1) {
+            const code = `MF-${randomUUID().replaceAll('-', '').toUpperCase()}`;
+            const ticket = await client.query(
+                `INSERT INTO tickets (order_id, code)
+                 VALUES ($1, $2)
+                 RETURNING id, code, created_at`,
+                [order.id, code]
+            );
+            tickets.push(ticket.rows[0]);
+        }
+
+        await client.query('COMMIT');
+        transactionStarted = false;
+
+        return res.json({
+            order: { id: order.id, status: 'paid' },
+            tickets
+        });
+    } catch (error) {
+        if (client && transactionStarted) {
+            await client.query('ROLLBACK');
+        }
+
+        if (error.status) {
+            return res.status(error.status).json({ error: error.message });
+        }
+
+        console.error('Could not simulate payment:', error.message);
+        return res.status(500).json({ error: 'Could not complete payment' });
     } finally {
         if (client) {
             client.release();

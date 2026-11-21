@@ -5,5 +5,6 @@ const { authenticateToken, requireBuyer } = require('../middleware/authMiddlewar
 const router = express.Router();
 
 router.post('/', authenticateToken, requireBuyer, orderController.createOrder);
+router.post('/:id/pay', authenticateToken, requireBuyer, orderController.simulatePayment);
 
 module.exports = router;
